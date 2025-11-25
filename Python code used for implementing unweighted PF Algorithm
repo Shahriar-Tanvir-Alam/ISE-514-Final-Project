@@ -1,0 +1,135 @@
+from math import inf
+
+# Input data
+
+m = 4                      # number of machines
+n = 3                      # number of jobs
+
+p = [
+    [6, 4, 6, 8],           # p1j
+    [2, 10, 4, 6],          # p2j
+    [4, 8, 0, 2],           # p3j
+]
+
+jobs = list(range(1, n + 1))
+
+# Helper functions
+
+def total_proc_time(job_index):
+    """Total processing time of job j (1-based index)."""
+    j = job_index - 1
+    return sum(p[i][j] for i in range(m))
+
+def initial_profile(first_job):
+    """Departure times of the first job from each machine."""
+    j = first_job - 1
+    D = [0] * m
+    D[0] = p[0][j]
+    for i in range(1, m):
+        D[i] = D[i-1] + p[i][j]
+    return D
+
+def candidate_profile(D, job):
+    """Compute candidate profile D^k for inserting 'job' next."""
+    j = job - 1
+    Dk = [0] * m
+
+    # Machine 1
+    Dk[0] = max(D[0] + p[0][j], D[1])
+
+    # Machines 2..m-1
+    for i in range(1, m-1):
+        Dk[i] = max(Dk[i-1] + p[i][j], D[i+1])
+
+    # Machine m
+    Dk[m-1] = Dk[m-2] + p[m-1][j]
+
+    return Dk
+
+def nonproductive_times(D, Dk, job):
+    """NP_i(k) and its unweighted sum."""
+    j = job - 1
+    NP = []
+    for i in range(m):
+        np_i = Dk[i] - D[i] - p[i][j]
+        NP.append(np_i)
+    total_NP = sum(NP)
+    return NP, total_NP
+
+# Unweighted PF heuristic
+
+print("Processing times p_ij (rows = machines, columns = jobs):")
+for i in range(m):
+    print(f"  Machine {i+1}: {p[i]}")
+print()
+
+# Step 1: choose first job with largest total processing time
+print("Step 1: Initial condition – choose first job with longest total processing time.")
+totals = {j: total_proc_time(j) for j in jobs}
+for j in jobs:
+    print(f"  Total processing time of job {j}: {totals[j]}")
+max_total = max(totals.values())
+# tie-break by smallest job index
+first_job = min(j for j in jobs if totals[j] == max_total)
+print(f"  -> Choose job {first_job} as first job in the MPS.\n")
+
+pi = [first_job]
+U = [j for j in jobs if j != first_job]
+
+D = initial_profile(first_job)
+print(f"Initial profile after scheduling job {first_job}:")
+for i in range(m):
+    print(f"  Departure time from machine {i+1}: D_{i+1} = {D[i]}")
+print()
+
+iteration = 1
+
+while U:
+    print(f"=== Iteration {iteration}: current sequence π = {pi}, remaining jobs U = {U} ===")
+    print("Current profile D (departure times of last job in π):")
+    for i in range(m):
+        print(f"  D_{i+1} = {D[i]}")
+    print()
+
+    best_job = None
+    best_NP_total = inf
+    best_Dk = None
+    best_NP_vec = None
+
+    # Step 2: analyze remaining jobs
+    for k in U:
+        print(f"  -- Candidate job k = {k} --")
+        Dk = candidate_profile(D, k)
+        for i in range(m):
+            print(f"     D_{i+1}^({k}) = {Dk[i]}")
+        NP_vec, NP_total = nonproductive_times(D, Dk, k)
+        for i in range(m):
+            print(f"     NP_{i+1}({k}) = D_{i+1}^({k}) - D_{i+1} - p_{i+1,{k}} "
+                  f"= {Dk[i]} - {D[i]} - {p[i][k-1]} = {NP_vec[i]}")
+        print(f"     Total nonproductive time NP({k}) = sum_i NP_i({k}) = {NP_total}\n")
+
+        if NP_total < best_NP_total:
+            best_NP_total = NP_total
+            best_job = k
+            best_Dk = Dk
+            best_NP_vec = NP_vec
+
+    # Step 3: select job with minimum total NP
+    print(f"  -> Select job k* = {best_job} "
+          f"(minimum total nonproductive time NP(k*) = {best_NP_total}).\n")
+
+    # Step 4: update sequence, profile, and remaining jobs
+    pi.append(best_job)
+    D = best_Dk
+    U.remove(best_job)
+
+    print(f"Updated sequence π = {pi}")
+    print("Updated profile D (departure times of last job in π):")
+    for i in range(m):
+        print(f"  D_{i+1} = {D[i]}")
+    print()
+
+    iteration += 1
+
+print(f"Final PF sequence π = {pi}")
+print(f"Final departure times of last job in sequence from machines 1..{m}: {D}")
