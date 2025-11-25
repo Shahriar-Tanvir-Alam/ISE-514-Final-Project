@@ -1,2 +1,3 @@
 # ISE-514-Final-Project
-Scheduling of Flexible Assembly Systems
+This report introduced the flexible assembly system. Three different models, such as unpaced assembly systems, paced assembly systems, and flexible flow systems with bypass, have been analyzed. Three heuristic algorithms are proposed for solving different sequencing problems. The Profile Fitting (PF) Heuristic is proposed for sequencing the unpaced assembly system. The computational study shows that the weighted version of the PF Heuristic provides better results. The Grouping and Spacing (GS) Heuristic Algorithm is suggested for sequencing the paced assembly system. For scheduling the flexible flow systems with Bypass, the Flexible Flow Line Loading Algorithm (FFLL) is proposed. The computational studies show the effectiveness of the proposed algorithms.
+
