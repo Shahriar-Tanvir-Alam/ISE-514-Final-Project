@@ -1,0 +1,348 @@
+from typing import List, Tuple
+
+# Helper printing utilities
+def print_title(title: str, final: bool = False):
+    mark = " (✓)" if final else ""
+    print("\n" + "=" * 70)
+    print(f"{title}{mark}")
+    print("-" * 70)
+
+def print_matrix(title: str, mat: List[List[float]], row_labels: List[str], col_labels: List[str], fmt: str = "{:.2f}"):
+    print(title)
+    # header
+    header = "      " + "".join(f"{c:>8}" for c in col_labels)
+    print(header)
+    print("      " + "--------" * len(col_labels))
+    for r_label, row in zip(row_labels, mat):
+        line = f"{r_label:>5} "
+        for val in row:
+            line += f"{fmt.format(val):>8}"
+        print(line)
+    print()
+
+# Input data (Example 6.4.1)
+p_prime = {
+    1: [0, 6, 3, 1, 3, 5],  # stage 1
+    2: [0, 3, 2, 1, 3, 2],  # stage 2
+    3: [0, 4, 5, 6, 3, 4]   # stage 3
+}
+
+H = 3                          # number of stages
+n = 5                          # number of jobs
+stage_sizes = {1: 2, 2: 1, 3: 2}  # number of parallel machines at each stage
+m = sum(stage_sizes.values())  # total machines (5 in this example)
+
+# Algorithm 2 — Machine_Allocation(p'_hj)  (Phase 1)
+def machine_allocation_example() -> List[List[float]]:
+    """
+    Implement Algorithm 2 exactly as in our pseudo-code,
+    with a small post-processing step that orders machines
+    inside each stage by decreasing workload so that the
+    final p_ij matrix matches the book's table.
+    """
+    print_title("Phase 1: Machine Allocation (Algorithm 2)")
+    print("Input processing times p'_hj (stages as rows, jobs as columns):")
+    for h in range(1, H + 1):
+        row = " ".join(f"{p_prime[h][j]:>4}" for j in range(1, n + 1))
+        print(f" Stage {h}: {row}")
+    print()
+
+    # First run LPT separately inside each stage with local machine indices.
+    stage_assignments = {}  # h -> (load_list, p_stage local matrix)
+
+    for h in range(1, H + 1):
+        s = stage_sizes[h]
+        Mh_local = list(range(s))  # local indices 0..s-1
+        J_h = [j for j in range(1, n + 1) if p_prime[h][j] > 0]
+
+        print(f"Stage {h}: machines = {s}, jobs needing processing J_h = {J_h}")
+        print("  Jobs in non-increasing order of p'_hj (LPT):")
+        J_sorted = sorted(J_h, key=lambda j: p_prime[h][j], reverse=True)
+        print("   order:", J_sorted)
+
+        load = [0.0] * s
+        p_stage = [[0.0] * (n + 1) for _ in range(s)]
+
+        for j in J_sorted:
+            # choose local machine with minimum load (tie -> smallest index)
+            i_star = min(Mh_local, key=lambda idx: load[idx])
+            before = load[i_star]
+            load[i_star] += p_prime[h][j]
+            p_stage[i_star][j] = float(p_prime[h][j])
+            print(f"   Assign job {j} (p'_{h}{j}={p_prime[h][j]}) -> local machine {i_star}"
+                  f" (load {before} -> {load[i_star]})")
+
+        print(f"  Local machine loads after LPT at stage {h}: {load}\n")
+        stage_assignments[h] = (load, p_stage)
+
+    p = [[0.0] * (n + 1) for _ in range(m + 1)]
+    global_id = 1
+    for h in range(1, H + 1):
+        load, p_stage = stage_assignments[h]
+        s = stage_sizes[h]
+        # order local machines by decreasing load
+        order = sorted(range(s), key=lambda idx: load[idx], reverse=True)
+        print(f"Stage {h}: mapping local machines {list(range(s))} to global IDs "
+              f"{list(range(global_id, global_id + s))} in order of decreasing load.")
+        for local_idx in order:
+            p[global_id] = p_stage[local_idx]
+            print(f"  Global machine {global_id} at stage {h} gets local machine {local_idx},"
+                  f" load = {load[local_idx]}")
+            global_id += 1
+        print()
+
+    final_matrix = [row[1:] for row in p[1:]]
+
+    print_matrix(
+        "Phase 1 final processing-time matrix p_ij (rows = machines, cols = jobs) (✓)",
+        final_matrix,
+        [f"Machine {i}" for i in range(1, m + 1)],
+        [str(j) for j in range(1, n + 1)],
+        fmt="{:.2f}"
+    )
+    return p  # keep 1-based version with dummy index 0
+
+# Algorithm 3 — Dynamic_Balancing(p_ij)  (Phase 2)
+def dynamic_balancing(p: List[List[float]]) -> Tuple[List[int], List[List[float]]]:
+    """
+    Implement the Dynamic Balancing heuristic exactly as in Algorithm 3.
+    We also print all intermediate calculations including the detailed
+    o_ij formulas (like the book) and all candidate O_ik(j) vectors.
+    """
+    print_title("Phase 2: Dynamic Balancing (Algorithm 3)")
+
+    # 1. Workloads per machine W_i
+    W_i = [0.0] * (m + 1)
+    for i in range(1, m + 1):
+        W_i[i] = sum(p[i][j] for j in range(1, n + 1))
+    print("Workloads W_i for each machine i:")
+    for i in range(1, m + 1):
+        print(f"  W_{i} = sum_j p_{i}j = {W_i[i]:.2f}")
+    print()
+
+    # 2. Total workload W
+    W = sum(W_i[1:])
+    print(f"Total workload of one MPS: W = sum_i W_i = {W:.2f}\n")
+
+    # 3. Total processing per job p_j
+    p_j = [0.0] * (n + 1)
+    print("Total processing time p_j for each job j:")
+    for j in range(1, n + 1):
+        terms = " + ".join(f"p_{i}{j}" for i in range(1, m + 1) if p[i][j] != 0)
+        p_j[j] = sum(p[i][j] for i in range(1, m + 1))
+        print(f"  p_{j} = {terms} = {p_j[j]:.2f}")
+    print()
+
+    # 4. Overload contributions o_ij and full matrix print
+    o = [[0.0] * (n + 1) for _ in range(m + 1)]
+    print("Detailed computation of o_ij = p_ij - p_j * W_i / W for each job j:")
+    for j in range(1, n + 1):
+        print(f"\nJob j = {j} (p_{j} = {p_j[j]:.2f})")
+        for i in range(1, m + 1):
+            term = p_j[j] * W_i[i] / W
+            o[i][j] = p[i][j] - term
+            # show exactly like the book: p_ij - p_j * W_i / W
+            print(f"  o_{i}{j} = p_{i}{j} - p_{j} * W_{i} / W"
+                  f" = {p[i][j]:.2f} - {p_j[j]:.2f} * {W_i[i]:.2f} / {W:.2f}"
+                  f" = {o[i][j]:+.2f}")
+    print()
+
+    # Print the o_ij matrix (should match the book's table)
+    o_matrix = [row[1:] for row in o[1:]]
+    print_matrix(
+        "Matrix o_ij (rows = machines i, cols = jobs j) (✓)",
+        o_matrix,
+        [f"i={i}" for i in range(1, m + 1)],
+        [f"j={j}" for j in range(1, n + 1)],
+        fmt="{:+.2f}"
+    )
+
+    print("\nStep-by-step Dynamic Balancing selection of sequence π:\n")
+
+    # current cumulative overload for the partial sequence J_k
+    cumulative_O = [0.0] * (m + 1)
+
+    selected_jobs: List[int] = []  # J_k
+    pi: List[int] = []
+
+    # helper to pretty print a vector
+    def vec_to_str(vec):
+        return "(" + ", ".join(f"{x:+.2f}" for x in vec[1:]) + ")"
+
+    for k in range(1, n + 1):
+        print("=" * 30)
+        print(f"Position k = {k}")
+        print(f"Jobs already in sequence J_{k-1}: {selected_jobs if selected_jobs else '[]'}")
+
+        best_j = None
+        best_f = None
+        best_O_candidate = None
+
+        for j in range(1, n + 1):
+            if j in selected_jobs:
+                continue
+
+            print(f"\n  Candidate job {j}:")
+            # For each i, compute O_ik(j) = cumulative_O[i] + o_ij
+            O_candidate = [0.0] * (m + 1)
+            detailed_terms = []
+            for i in range(1, m + 1):
+                before = cumulative_O[i]
+                add = o[i][j]
+                O_candidate[i] = before + add
+                detailed_terms.append(
+                    f"     O_{i}{k}(j={j}) = O_{i}{k-1} + o_{i}{j}"
+                    f" = {before:+.2f} + {add:+.2f} = {O_candidate[i]:+.2f}"
+                )
+            print("   Cumulative overload per machine when job", j, "is placed at position", k)
+            for line in detailed_terms:
+                print(line)
+            print(f"   => O_i(j={j}) vector = {vec_to_str(O_candidate)}")
+
+            # Compute f(j) = sum_i max(O_ik(j), 0)
+            f_j = sum(max(O_candidate[i], 0.0) for i in range(1, m + 1))
+            print(
+                "   f({}) = sum_i max(O_ik(j), 0) = ".format(j)
+                + " + ".join(f"max({O_candidate[i]:+.2f},0)" for i in range(1, m + 1))
+                + f" = {f_j:.2f}"
+            )
+
+            if best_f is None or f_j < best_f - 1e-9:
+                best_f = f_j
+                best_j = j
+                best_O_candidate = O_candidate
+
+        # choose best_j
+        assert best_j is not None
+        print(f"\n--> Select job {best_j} at position {k} (smallest f(j) = {best_f:.2f}).")
+        selected_jobs.append(best_j)
+        pi.append(best_j)
+        cumulative_O = best_O_candidate  # update
+        print(f"    Updated cumulative overload O_ik after position {k}: {vec_to_str(cumulative_O)}\n")
+
+    print(f"Final sequence π found by Dynamic Balancing: π = {pi}  (✓)\n")
+    return pi, o
+
+# Algorithm 4 — Release_Timing(π)  (Phase 3)
+def release_timing(p: List[List[float]], pi: List[int]):
+    """
+    Implement Algorithm 4 in a direct, literal way.
+    We assume the processing order on each machine is π restricted to jobs
+    that actually visit that machine (p_ij > 0).
+    """
+    print_title("Phase 3: Release Timing (Algorithm 4)")
+
+    # 1–4. Compute W_i and bottleneck machine b, cycle time C = W_b
+    W_i = [0.0] * (m + 1)
+    for i in range(1, m + 1):
+        W_i[i] = sum(p[i][j] for j in range(1, n + 1))
+    b = max(range(1, m + 1), key=lambda i: W_i[i])
+    C = W_i[b]
+
+    print("Workloads W_i and bottleneck machine b:")
+    for i in range(1, m + 1):
+        flag = "  <-- bottleneck" if i == b else ""
+        print(f"  W_{i} = {W_i[i]:.2f}{flag}")
+    print(f"\nCycle time C is set to W_b = W_{b} = {C:.2f}\n")
+
+    # We'll build start and completion times s_ij, c_ij.
+    s = [[0.0] * (n + 1) for _ in range(m + 1)]
+    c = [[0.0] * (n + 1) for _ in range(m + 1)]
+
+    # Initial forward schedule in process order: machines 1..m
+    print("Initial forward schedule (before upstream/downstream adjustments):")
+    for i in range(1, m + 1):
+        time_i = 0.0
+        for j in pi:
+            if p[i][j] <= 0:
+                continue
+
+            # find previous machine index < i with p>0
+            prev_machines = [i_prev for i_prev in range(1, i)
+                             if p[i_prev][j] > 0]
+            prev_comp = max(c[i_prev][j] for i_prev in prev_machines) if prev_machines else 0.0
+            s_ij = max(time_i, prev_comp)
+            c_ij = s_ij + p[i][j]
+            s[i][j] = s_ij
+            c[i][j] = c_ij
+            time_i = c_ij
+            print(f"  Machine {i}, job {j}: start s_{i}{j} = {s_ij:.2f},"
+                  f" completion c_{i}{j} = {c_ij:.2f}")
+        print()
+
+    # Upstream machines (i < b): delay jobs as much as possible
+    print("Adjusting upstream machines (i < b): delaying as much as possible.")
+    for i in range(b - 1, 0, -1):  # reverse process order upstream
+        print(f"\nUpstream machine {i}:")
+        jobs_i = [j for j in pi if p[i][j] > 0]
+        if not jobs_i:
+            print("  (no jobs on this machine)")
+            continue
+        last_j = jobs_i[-1]
+        downstream = [i2 for i2 in range(i + 1, m + 1) if p[i2][last_j] > 0]
+        if downstream:
+            limit = min(s[i2][last_j] for i2 in downstream)
+        else:
+            limit = C
+        delta = max(0.0, limit - c[i][last_j])
+        print(f"  Last job on machine {i} is job {last_j},"
+              f" current completion c_{i}{last_j} = {c[i][last_j]:.2f},"
+              f" delay allowed δ = {delta:.2f}")
+        for j in jobs_i:
+            s[i][j] += delta
+            c[i][j] += delta
+            print(f"   Job {j}: new s_{i}{j} = {s[i][j]:.2f}, c_{i}{j} = {c[i][j]:.2f}")
+
+    # Downstream machines (i > b): advance jobs as early as possible
+    print("\nAdjusting downstream machines (i > b): advancing as much as possible.")
+    for i in range(b + 1, m + 1):
+        print(f"\nDownstream machine {i}:")
+        jobs_i = [j for j in pi if p[i][j] > 0]
+        if not jobs_i:
+            print("  (no jobs on this machine)")
+            continue
+        time_i = 0.0
+        for j in jobs_i:
+            prev_machines = [i_prev for i_prev in range(1, i)
+                             if p[i_prev][j] > 0]
+            prev_comp = max(c[i_prev][j] for i_prev in prev_machines) if prev_machines else 0.0
+            s_ij = max(time_i, prev_comp)
+            c_ij = s_ij + p[i][j]
+            print(f"  Job {j}: move start from {s[i][j]:.2f} to {s_ij:.2f},"
+                  f" completion from {c[i][j]:.2f} to {c_ij:.2f}")
+            s[i][j] = s_ij
+            c[i][j] = c_ij
+            time_i = c_ij
+
+    print_title("Final start and completion times (after Release Timing)", final=True)
+    s_mat = [[s[i][j] for j in range(1, n + 1)] for i in range(1, m + 1)]
+    c_mat = [[c[i][j] for j in range(1, n + 1)] for i in range(1, m + 1)]
+
+    print_matrix("Start times s_ij:", s_mat,
+                 [f"Machine {i}" for i in range(1, m + 1)],
+                 [str(j) for j in range(1, n + 1)],
+                 fmt="{:.2f}")
+    print_matrix("Completion times c_ij:", c_mat,
+                 [f"Machine {i}" for i in range(1, m + 1)],
+                 [str(j) for j in range(1, n + 1)],
+                 fmt="{:.2f}")
+    print(f"Cycle time C = {C:.2f} (✓)\n")
+
+    return s, c, C
+
+# Main driver (Algorithm 1)
+def main():
+    # Phase 1: Machine Allocation
+    p = machine_allocation_example()
+
+    # Phase 2: Dynamic Balancing
+    pi, o = dynamic_balancing(p)
+
+    # Phase 3: Release Timing
+    s, c, C = release_timing(p, pi)
+
+
+if __name__ == "__main__":
+    main()
+
+
