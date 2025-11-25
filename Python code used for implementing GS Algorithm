@@ -1,0 +1,217 @@
+import math
+from itertools import permutations
+import pandas as pd
+
+# Input Data
+jobs = list(range(1, 11))  # jobs 1,...,10
+
+# Attribute 1: (setup-cost)
+a1 = {
+    1: 1, 2: 1, 3: 1,   # Group 1
+    4: 3, 5: 3, 6: 3,   # Group 2
+    7: 5, 8: 5, 9: 5, 10: 5  # Group 3
+}
+
+# Attribute 2: capacity-constrained operation indicator (1 = uses the bottleneck operation)
+a2 = {
+    1: 0, 2: 1, 3: 1,
+    4: 0, 5: 1, 6: 1,
+    7: 1, 8: 0, 9: 0, 10: 0
+}
+
+INF = math.inf
+
+# Due dates
+d = {
+    1: INF, 2: INF, 3: 2,   # job 3 has due date 2
+    4: INF, 5: INF, 6: INF,
+    7: 6,                   # job 7 has due date 6
+    8: INF, 9: INF, 10: INF
+}
+
+# Penalty weights
+w = {
+    1: 0, 2: 4, 3: 0,
+    4: 0, 5: 0, 6: 0,
+    7: 4,
+    8: 0, 9: 0, 10: 0
+}
+
+# ψ2(ℓ) = max(3 − ℓ, 0) for the capacity cost
+def psi2(ell: int) -> int:
+    return max(3 - ell, 0)
+
+# Cost functions
+def setup_cost(seq):
+    """Total setup cost based on attribute a1 (difference when color changes)."""
+    cost = 0
+    for j, k in zip(seq[:-1], seq[1:]):
+        if a1[j] != a1[k]:
+            cost += abs(a1[j] - a1[k])
+    return cost
+
+def capacity_cost(seq):
+    """Total capacity-violation cost using a2 and ψ2."""
+    idxs = [pos for pos, j in enumerate(seq) if a2[j] == 1]
+    cost = 0
+    for i in range(len(idxs) - 1):
+        ell = idxs[i + 1] - idxs[i]  # spacing between two jobs that use the bottleneck
+        cost += psi2(ell)
+    return cost
+
+def tardiness_cost(seq):
+    """Total weighted tardiness using due dates d_j and weights w_j."""
+    pos_of = {job: i + 1 for i, job in enumerate(seq)}  # positions are 1-based
+    cost = 0
+    for j in seq:
+        if d[j] != INF:
+            Tj = max(pos_of[j] - d[j], 0)
+            cost += w[j] * Tj
+    return cost
+
+def total_cost(seq):
+    return setup_cost(seq) + capacity_cost(seq) + tardiness_cost(seq)
+
+# Phase 1: Select jobs (planning horizon)
+j_star = jobs[:]  # in this example, all 10 jobs are scheduled
+print("PHASE 1: Selection of jobs for the planning period")
+print("  We schedule all jobs j* = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}.\n")
+
+# Phase 2: Grouping by high setup-cost attribute a1
+print("PHASE 2: Grouping by high setup-cost attribute a1 (color)")
+
+# group by color
+groups_by_color = {}
+for j in j_star:
+    color = a1[j]
+    groups_by_color.setdefault(color, []).append(j)
+
+# sort jobs in each group by job index
+for c in groups_by_color:
+    groups_by_color[c].sort()
+
+print("  Jobs grouped by color (a1):")
+for color, js in sorted(groups_by_color.items()):
+    print(f"    Color {color}: jobs {js}")
+
+# Assign labels A, B, C to colors 1, 3, 5 (to match the book notation)
+color_values = sorted(groups_by_color.keys())  # [1, 3, 5]
+group_labels = ['A', 'B', 'C']
+color_to_group = dict(zip(color_values, group_labels))
+group_to_jobs = {
+    color_to_group[color]: groups_by_color[color] for color in color_values
+}
+
+print("\n  We label the groups as:")
+for color in color_values:
+    g = color_to_group[color]
+    print(f"    Group {g}: color {color}, jobs {group_to_jobs[g]}")
+
+print("\n  In this example, run lengths are simply the full group sizes:")
+for g in group_labels:
+    print(f"    Group {g}: run length = {len(group_to_jobs[g])} (all jobs of that color)\n")
+
+# Phase 3: Determine order of groups using shipping / due-date information
+print("PHASE 3: Determining the order of the groups (using due dates and weights)")
+print("  We keep the original order inside each group and test all 3! group orders.")
+print("  For each group order, we compute only the tardiness cost.\n")
+
+best_group_order = None
+best_tardiness = None
+
+for order in permutations(group_labels):
+    seq = []
+    for g in order:
+        seq += group_to_jobs[g]
+    tc = tardiness_cost(seq)
+    print(f"  Group order {order} gives sequence {seq} with tardiness cost = {tc}")
+    if best_tardiness is None or tc < best_tardiness:
+        best_tardiness = tc
+        best_group_order = order
+
+print(f"\n  --> Chosen group order (minimum tardiness): {best_group_order}")
+seq_phase3 = []
+for g in best_group_order:
+    seq_phase3 += group_to_jobs[g]
+print(f"  Initial sequence π after Phase 3 (concatenating groups in this order):")
+print(f"    π_phase3 = {seq_phase3}\n")
+
+# Phase 4: Spacing jobs that use the bottleneck operation (a2 = 1)
+print("PHASE 4: Spacing capacity-constrained jobs (a2 = 1) within the fixed group order")
+print("  We keep the chosen group order fixed and reorder jobs *within* each group.")
+print("  For each combination of permutations inside groups A, B, C,")
+print("  we compute setup + capacity + tardiness cost and select the best.\n")
+
+best_seq = None
+best_seq_cost = None
+best_perm_A = None
+best_perm_B = None
+best_perm_C = None
+
+# All permutations inside each group
+perms_A = list(permutations(group_to_jobs['A']))
+perms_B = list(permutations(group_to_jobs['B']))
+perms_C = list(permutations(group_to_jobs['C']))
+
+candidates_checked = 0
+
+for perm_A in perms_A:
+    for perm_C in perms_C:
+        for perm_B in perms_B:
+            # build sequence according to best_group_order, but using internal permutations
+            seq = []
+            for g in best_group_order:
+                if g == 'A':
+                    seq += list(perm_A)
+                elif g == 'B':
+                    seq += list(perm_B)
+                elif g == 'C':
+                    seq += list(perm_C)
+            cost = total_cost(seq)
+            candidates_checked += 1
+            if best_seq_cost is None or cost < best_seq_cost:
+                best_seq_cost = cost
+                best_seq = seq
+                best_perm_A = perm_A
+                best_perm_B = perm_B
+                best_perm_C = perm_C
+
+print(f"  Total candidate sequences checked in spacing step: {candidates_checked}")
+print("\n  Best internal ordering found:")
+print(f"    Group A (color 1) internal order: {best_perm_A}")
+print(f"    Group C (color 5) internal order: {best_perm_C}")
+print(f"    Group B (color 3) internal order: {best_perm_B}")
+print("\n  Final sequence π after spacing (Phase 4):")
+print(f"    π_final = {best_seq}")
+
+sc = setup_cost(best_seq)
+cc = capacity_cost(best_seq)
+tc = tardiness_cost(best_seq)
+total = sc + cc + tc
+
+print("\n  Cost breakdown for π_final:")
+print(f"    Setup cost      = {sc}")
+print(f"    Capacity cost   = {cc}")
+print(f"    Tardiness cost  = {tc}")
+print(f"    Total cost      = {total}\n")
+
+# Detailed spacing explanation for bottleneck jobs
+print("  Detailed spacing for capacity-constrained jobs (a2 = 1):")
+positions = []
+for pos, j in enumerate(best_seq, start=1):  # positions 1..10
+    if a2[j] == 1:
+        positions.append((j, pos))
+print(f"    Jobs with a2 = 1 in π_final: {[j for j, _ in positions]}")
+print(f"    Their positions in π_final: {[pos for _, pos in positions]}")
+
+# Compute ℓ and ψ2(ℓ) step by step
+cap_cost_explain = 0
+for (j1, p1), (j2, p2) in zip(positions[:-1], positions[1:]):
+    ell = p2 - p1
+    term = psi2(ell)
+    cap_cost_explain += term
+    print(f"      Between job {j1} at position {p1} and job {j2} at position {p2}: "
+          f"ℓ = {ell}, ψ2(ℓ) = {term}")
+
+print(f"    Sum of ψ2(ℓ) terms = {cap_cost_explain} (matches capacity cost {cc})\n")
+
